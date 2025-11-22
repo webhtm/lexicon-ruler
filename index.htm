@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Lexicon Ruler</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --card-bg: #f0f0f0;
+            --text-color: #111;
+            --accent-yes: #2ecc71;
+            --accent-no: #e74c3c;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Courier New', Courier, monospace; /* Typewriter feel */
+            background-color: var(--bg-color);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            user-select: none;
+            touch-action: none;
+            color: white;
+        }
+
+        /* --- Top Stats --- */
+        #stats-bar {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+            max-width: 400px;
+            padding: 20px 0;
+            font-size: 1.2rem;
+            border-bottom: 1px solid #333;
+            z-index: 10;
+        }
+        .stat-box { text-align: center; }
+        .stat-label { font-size: 0.7rem; opacity: 0.7; display: block; }
+
+        /* --- Game Area --- */
+        #game-container {
+            position: relative;
+            flex-grow: 1;
+            width: 100%;
+            max-width: 400px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            perspective: 1000px;
+        }
+
+        .card {
+            position: absolute;
+            width: 85%;
+            height: 60%;
+            background-color: var(--card-bg);
+            border-radius: 4px; /* Sharper corners for paper look */
+            box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+            text-align: center;
+            cursor: grab;
+            transform-origin: 50% 100%;
+        }
+        .card:active { cursor: grabbing; }
+
+        /* The Scrambled Word */
+        .word-display {
+            font-size: 3rem;
+            font-weight: 900;
+            color: #222;
+            letter-spacing: 5px;
+            line-height: 1.2;
+            word-break: break-all;
+            text-transform: uppercase;
+        }
+
+        .hint-text {
+            margin-top: 20px;
+            font-size: 0.9rem;
+            color: #666;
+            font-style: italic;
+        }
+
+        /* --- Overlays --- */
+        .overlay {
+            position: absolute;
+            font-size: 4rem;
+            font-weight: bold;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 20;
+            top: 30%;
+        }
+        .yes-txt { right: 40px; color: var(--accent-yes); transform: rotate(15deg); border: 5px solid var(--accent-yes); padding: 10px;}
+        .no-txt { left: 40px; color: var(--accent-no); transform: rotate(-15deg); border: 5px solid var(--accent-no); padding: 10px;}
+
+        /* --- Feedback (Floating Text) --- */
+        #feedback {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 2.5rem;
+            font-weight: bold;
+            text-shadow: 0 2px 10px black;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s;
+            z-index: 50;
+            white-space: nowrap;
+        }
+
+        /* --- Controls --- */
+        #controls {
+            margin-bottom: 40px;
+            display: flex;
+            gap: 40px;
+            z-index: 10;
+        }
+        .btn {
+            width: 70px; height: 70px;
+            border-radius: 50%;
+            border: 2px solid white;
+            background: transparent;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+        .btn:active { background: rgba(255,255,255,0.2); }
+
+    </style>
+</head>
+<body>
+
+    <div id="stats-bar">
+        <div class="stat-box">
+            <span class="stat-label">POPULATION</span>
+            <span id="pop">50</span>
+        </div>
+        <div class="stat-box">
+            <span class="stat-label">WEALTH</span>
+            <span id="gold">50</span>
+        </div>
+        <div class="stat-box">
+            <span class="stat-label">ORDER</span>
+            <span id="order">50</span>
+        </div>
+    </div>
+
+    <div id="feedback"></div>
+
+    <div id="game-container">
+        <div id="card" class="card">
+            <div class="yes-txt overlay">ACCEPT</div>
+            <div class="no-txt overlay">BANISH</div>
+            
+            <div class="word-display" id="word-text">...</div>
+            <div class="hint-text">Unscramble & Decide</div>
+        </div>
+    </div>
+
+    <div id="controls">
+        <button class="btn" id="btn-no">✕</button>
+        <button class="btn" id="btn-yes">✓</button>
+    </div>
+
+<script>
+    // --- 1. THE DICTIONARY ---
+    // "type" determines what stats it affects if ACCEPTED.
+    // 0: Bad (Hurts stats), 1: Good (Helps stats), 2: Chaos (Random/Tradeoff)
+    const dictionary = [
+        // GOOD WORDS (You should Accept)
+        { w: "HARVEST", t: 1, stat: "pop" },
+        { w: "GOLD", t: 1, stat: "gold" },
+        { w: "PEACE", t: 1, stat: "pop" },
+        { w: "FEAST", t: 1, stat: "pop" },
+        { w: "TRADE", t: 1, stat: "gold" },
+        { w: "LAW", t: 1, stat: "order" },
+        { w: "BUILD", t: 1, stat: "order" },
+        { w: "DOCTOR", t: 1, stat: "pop" },
+        { w: "RAIN", t: 1, stat: "pop" },
+        { w: "TRUTH", t: 1, stat: "order" },
+        { w: "ALLY", t: 1, stat: "order" },
+        { w: "HERO", t: 1, stat: "pop" },
+        { w: "GIFT", t: 1, stat: "gold" },
+        { w: "JOY", t: 1, stat: "pop" },
+        
+        // BAD WORDS (You should Banish)
+        { w: "PLAGUE", t: 0, stat: "pop" },
+        { w: "WAR", t: 0, stat: "pop" },
+        { w: "THEFT", t: 0, stat: "gold" },
+        { w: "RIOT", t: 0, stat: "order" },
+        { w: "FIRE", t: 0, stat: "pop" },
+        { w: "DEBT", t: 0, stat: "gold" },
+        { w: "LIE", t: 0, stat: "order" },
+        { w: "RAT", t: 0, stat: "pop" },
+        { w: "POISON", t: 0, stat: "pop" },
+        { w: "MURDER", t: 0, stat: "order" },
+        { w: "SPY", t: 0, stat: "order" },
+        { w: "FAMINE", t: 0, stat: "pop" },
+        { w: "TAX", t: 0, stat: "gold" }, // People hate tax
+        { w: "DECAY", t: 0, stat: "pop" },
+        
+        // TRICKY WORDS (Context dependent)
+        { w: "SWORD", t: 2, stat: "army" }, // Costs gold, adds order
+        { w: "MAGIC", t: 2, stat: "chaos" },
+        { w: "GAMBLE", t: 2, stat: "gold" }
+    ];
+
+    // --- 2. STATE ---
+    let state = { pop: 50, gold: 50, order: 50 };
+    let currentWord = null;
+    let currentScramble = "";
+
+    // DOM
+    const card = document.getElementById('card');
+    const wordText = document.getElementById('word-text');
+    const feedback = document.getElementById('feedback');
+    const yesO = document.querySelector('.yes-txt');
+    const noO = document.querySelector('.no-txt');
+
+    // --- 3. LOGIC ---
+
+    function scramble(word) {
+        let arr = word.split('');
+        // Fisher-Yates Shuffle
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        // Prevent it from accidentally being the correct word
+        if (arr.join('') === word) return scramble(word);
+        return arr.join('  '); // Spaces for readability
+    }
+
+    function loadNewCard() {
+        // Pick random
+        currentWord = dictionary[Math.floor(Math.random() * dictionary.length)];
+        currentScramble = scramble(currentWord.w);
+        
+        // Render
+        wordText.textContent = currentScramble;
+        
+        // Reset visuals
+        card.style.transform = `translate(0px, 0px) rotate(0deg)`;
+        card.style.transition = 'transform 0.3s ease-out';
+        yesO.style.opacity = 0;
+        noO.style.opacity = 0;
+    }
+
+    function showFeedback(text, color) {
+        feedback.textContent = text;
+        feedback.style.color = color;
+        feedback.style.opacity = 1;
+        setTimeout(() => feedback.style.opacity = 0, 800);
+    }
+
+    function handleChoice(accepted) {
+        // Logic: 
+        // If Word is GOOD (1) and Accepted -> +Stats
+        // If Word is GOOD (1) and Banished -> -Stats (Missed opportunity)
+        // If Word is BAD (0) and Accepted -> -Stats (Disaster)
+        // If Word is BAD (0) and Banished -> +Stats (Saved the kingdom)
+
+        const type = currentWord.t;
+        const val = 10; // Impact value
+        
+        let goodChoice = false;
+        let outcomeText = "";
+
+        if (accepted) {
+            outcomeText = "ACCEPTED: " + currentWord.w;
+            if (type === 1) { // Good thing accepted
+                adjustStat(currentWord.stat, val);
+                goodChoice = true;
+            } else if (type === 0) { // Bad thing accepted
+                adjustStat(currentWord.stat, -val);
+                goodChoice = false;
+            } else { // Neutral/Chaos
+                if(Math.random() > 0.5) { adjustStat('gold', val); goodChoice=true;} 
+                else { adjustStat('order', -val); goodChoice=false;}
+            }
+        } else {
+            outcomeText = "BANISHED: " + currentWord.w;
+            if (type === 0) { // Bad thing banished
+                adjustStat('order', 5); // Bonus for being smart
+                goodChoice = true;
+            } else if (type === 1) { // Good thing banished
+                adjustStat('gold', -5); // Cost of ignorance
+                goodChoice = false;
+            } else {
+                goodChoice = true; // Safety first
+            }
+        }
+
+        showFeedback(currentWord.w, goodChoice ? "#2ecc71" : "#e74c3c");
+        
+        // Animate away
+        const screenW = window.innerWidth;
+        card.style.transition = 'transform 0.4s ease-in';
+        card.style.transform = `translate(${accepted ? screenW : -screenW}px, 100px) rotate(${accepted?20:-20}deg)`;
+
+        setTimeout(loadNewCard, 300);
+    }
+
+    function adjustStat(key, val) {
+        if(key === 'chaos') {
+            state.pop += (Math.random() > 0.5 ? 10 : -10);
+            state.gold += (Math.random() > 0.5 ? 10 : -10);
+        } else {
+            state[key] += val;
+        }
+        
+        // Clamp and Update
+        if(state.pop > 100) state.pop = 100;
+        if(state.gold > 100) state.gold = 100;
+        if(state.order > 100) state.order = 100;
+
+        document.getElementById('pop').textContent = state.pop;
+        document.getElementById('gold').textContent = state.gold;
+        document.getElementById('order').textContent = state.order;
+
+        // Death Check
+        if(state.pop <= 0 || state.gold <= 0 || state.order <= 0) {
+            alert("Kingdom Collapsed! The word was: " + currentWord.w);
+            location.reload();
+        }
+    }
+
+    // --- 4. INPUT HANDLING ---
+    let isDragging = false;
+    let startX = 0;
+
+    card.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        card.style.transition = 'none';
+        card.setPointerCapture(e.pointerId);
+    });
+
+    card.addEventListener('pointermove', (e) => {
+        if(!isDragging) return;
+        const dx = e.clientX - startX;
+        card.style.transform = `translate(${dx}px, 0px) rotate(${dx * 0.05}deg)`;
+        
+        if(dx > 0) {
+            yesO.style.opacity = Math.min(dx/100, 1);
+            noO.style.opacity = 0;
+        } else {
+            noO.style.opacity = Math.min(Math.abs(dx)/100, 1);
+            yesO.style.opacity = 0;
+        }
+    });
+
+    card.addEventListener('pointerup', (e) => {
+        if(!isDragging) return;
+        isDragging = false;
+        const dx = e.clientX - startX;
+        if(Math.abs(dx) > 100) {
+            handleChoice(dx > 0);
+        } else {
+            card.style.transition = 'transform 0.3s ease-out';
+            card.style.transform = `translate(0px, 0px) rotate(0deg)`;
+            yesO.style.opacity = 0;
+            noO.style.opacity = 0;
+        }
+    });
+
+    document.getElementById('btn-yes').onclick = () => handleChoice(true);
+    document.getElementById('btn-no').onclick = () => handleChoice(false);
+
+    // Start
+    loadNewCard();
+
+</script>
+</body>
+</html>
